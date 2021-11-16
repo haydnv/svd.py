@@ -19,7 +19,7 @@ class SVDTests(unittest.TestCase):
 
         self.assertTrue(np.allclose(np.matmul(U.T, U), np.eye(m)))
         self.assertTrue(np.allclose(np.matmul(V.T, V), np.eye(n)))
-        self.assertTrue(np.allclose(reconstruction, m))
+        self.assertTrue(np.allclose(reconstruction, x))
 
 
 if __name__ == "__main__":

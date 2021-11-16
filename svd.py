@@ -1,5 +1,3 @@
-import itertools
-
 import numpy as np
 
 # from "Numerical Recipes in C" p. 65
@@ -8,6 +6,7 @@ EPS = 10**-6
 
 def zeroize(x):
     """Zero out entries `x[i][j]` in the given matrix `x` where `abs(x[i][j]) <= EPS`"""
+
     return x * (np.abs(x) > EPS)
 
 
@@ -64,6 +63,19 @@ def bidiagonalize(x):
             V_t = right(k)
 
     return U, zeroize(A), V_t
+
+
+# based on https://drsfenner.org/blog/2016/03/givens-rotations-and-qr/
+def givens(x, z):
+    """Return the Givens matrix to map `x` -> r and `z` -> 0, where `r = (x**2 + z**2)**0.5`"""
+
+    if z == 0:
+        return 1., 0.
+
+    r = (x**2 + z**2)**0.5
+    c = x / r
+    s = -z / r
+    return np.array([[c, s], [-s, c]])
 
 
 def has_zero_superdiagonal(x):
@@ -137,7 +149,8 @@ def svd(x):
             # TODO: apply the Golub-Kahan SVD step
             pass
         else:
-            # TODO: Apply Givens rotation so that B[i][i + 1] == 0 and B_2_2(p, q) is still upper bidiagonal
-            pass
+            # Apply Givens rotation so that B[i][i + 1] == 0 and B_2_2(p, q) is still upper bidiagonal
+            rotation = givens(B[i][i + 1], B[i][i])
+            B[:, [i + 1, i]] = np.matmul(B[:, [i + 1, i]], rotation)
 
         break
