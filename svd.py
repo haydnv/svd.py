@@ -171,21 +171,21 @@ def svd(x, max_iterations=30):
 
     m, n = x.shape
 
-    # Golub-Reinsch step 1
+    # step 1
     U, B, V_t = bidiagonalize(x)
     V = V_t.T
 
-    # Golub-Reinsch step 2
+    # step 2
     num_iterations = 0
     Sigma = None
     while num_iterations < max_iterations:
 
-        # Golub-Reinsch step 2a
+        # step 2a
         for i in range(n - 1):
             if abs(B[i][i + 1]) < EPS:
                 B[i][i + 1] = 0
 
-        # Golub-Reinsch step 2b
+        # step 2b
         B_2_2 = lambda p, q: B[-(q + p):-q, p + 1:-q]
         B_3_3 = lambda q: B[-q:, -q:]
 
@@ -202,12 +202,12 @@ def svd(x, max_iterations=30):
             p += 1
             q = n - (p * 2)
 
-        # Golub-Reinsch step 2c
+        # step 2c
         if q == (n - (p + q)):
             Sigma = np.diagonal(B)
             break
 
-        # Golub-Reinsch step 2d
+        # step 2d
         i_start = p + 1
         i_stop = n - q - 1
         if np.diagonal(B[i_start:i_stop, i_start:i_stop]).any():
