@@ -114,7 +114,7 @@ def golub_kahan(B, Q, P, p, q):
     # derived using the determinant of a 2x2 matrix and the quadratic formula
     # A = [[a, b], [c, d]]
     # |A - lI| = 0 (where l is an eigenvalue)
-    # la*ld - bc = 0 (the determinant)
+    # (a - l)*(d - l) - bc = 0 (the determinant)
     # l**2 - l(a - d) - (ad - bc) = 0 (a quadratic polynomial)
     def eigenvalues(C):
         """Compute the eigenvalues of a 2x2 matrix C"""
