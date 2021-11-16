@@ -15,20 +15,20 @@ def zeroize(x):
 def householder(x):
     """Compute the Householder vector of the given column vector `x`."""
 
-    v = np.copy(x)
-    s = v[1:].dot(v[1:])
-    alpha = v[0]
-    v[0] = 1.0
+    s = (x[1:]**2).sum()
 
     if s > EPS:
+        alpha = x[0]
         t = np.sqrt(alpha**2 + s)
         v_zero = alpha - t if alpha <= 0 else -s / (alpha + t)
-        v[0] = v_zero
-        v = v / v_zero
+    else:
+        v_zero = 1.0
 
+    v = np.copy(x)
+    v[0] = v_zero
     beta = 0 if s < EPS else 2 * v_zero**2 / (s + v_zero**2)
 
-    return v, beta
+    return v / v_zero, beta
 
 
 # based on http://drsfenner.org/blog/2016/03/householder-bidiagonalization/
@@ -40,14 +40,14 @@ def bidiagonalize(x):
     assert m >= n
     U, V_t = np.eye(m), np.eye(n)
 
-    def left(A, k):
+    def left(k):
         v, beta = householder(A[k:, k])
         A[k:, k:] = (np.eye(m - k) - beta * np.outer(v, v)).dot(A[k:, k:])
         Q = np.eye(m)
         Q[k:, k:] -= beta * np.outer(v, v)
         return U.dot(Q)
 
-    def right(A, k):
+    def right(k):
         v, beta = householder(A[k, k + 1:].T)
         A[k:, k + 1:] = A[k:, k + 1:].dot(np.eye(n - (k + 1)) - beta * np.outer(v, v))
         P = np.eye(n)
@@ -55,9 +55,9 @@ def bidiagonalize(x):
         return P.dot(V_t)
 
     for k in range(n):
-        U = left(A, k)
+        U = left(k)
 
         if k <= n - 2:
-            V_t = right(A, k)
+            V_t = right(k)
 
     return U, zeroize(A), V_t
