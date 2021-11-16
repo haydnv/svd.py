@@ -1,3 +1,5 @@
+import itertools
+
 import numpy as np
 
 # from "Numerical Recipes in C" p. 65
@@ -21,12 +23,13 @@ def householder(x):
         alpha = x[0]
         t = np.sqrt(alpha**2 + s)
         v_zero = alpha - t if alpha <= 0 else -s / (alpha + t)
+        beta = 2 * v_zero ** 2 / (s + v_zero ** 2)
     else:
-        v_zero = 1.0
+        v_zero = 1.
+        beta = 0
 
     v = np.copy(x)
     v[0] = v_zero
-    beta = 0 if s < EPS else 2 * v_zero**2 / (s + v_zero**2)
 
     return v / v_zero, beta
 
@@ -61,3 +64,80 @@ def bidiagonalize(x):
             V_t = right(k)
 
     return U, zeroize(A), V_t
+
+
+def has_zero_superdiagonal(x):
+    """Return `True` if the given square matrix `x` is has any zero entry above its diagonal."""
+    assert x.shape[0] == x.shape[1] and x.ndim == 2
+    m = x.shape[0]
+
+    for i in range(1, m):
+        if not np.diagonal(x[:i, :i]).all():
+            return True
+
+    return False
+
+
+def is_diagonal(x):
+    """Return `True` if the given square matrix `x` is diagonal."""
+    assert x.shape[0] == x.shape[1] and x.ndim == 2
+
+    return not np.any(x - np.diag(np.diagonal(x)))
+
+
+# Golub-Reinsch SVD algorithm
+# implementation based on:
+#   "Numerical Recipes in C" section 2.6, see http://www.grad.hr/nastava/gs/prg/NumericalRecipesinC.pdf
+#
+#   "Computation of the Singular Value Decomposition",
+#   see https://www.cs.utexas.edu/users/inderjit/public_papers/HLA_SVD.pdf
+def svd(x):
+    """Compute the singular value decomposition of the matrix `x`"""
+
+    m, n = x.shape
+
+    # Golub-Reinsch step 1
+    U, B, V_t = bidiagonalize(x)
+    V = V_t.T
+
+    # Golub-Reinsch step 2
+    while True:
+
+        # Golub-Reinsch step 2a
+        for i in range(n - 1):
+            if abs(B[i][i + 1]) < EPS:
+                B[i][i + 1] = 0
+
+        # Golub-Reinsch step 2b
+        B_2_2 = lambda p, q: B[-(q + p):-q, p + 1:-q]
+        B_3_3 = lambda q: B[-q:, -q:]
+
+        p = 1
+        q = n - 1
+        while (p * 2) < n:
+
+            if not is_diagonal(B_3_3(q)):
+                break
+
+            if not has_zero_superdiagonal(B_2_2(p, q)):
+                break
+
+            p += 1
+            q = n - (p * 2)
+
+        # Golub-Reinsch step 2c
+        if q == (n - (p + q)):
+            Sigma = np.diagonal(B)
+            break
+
+        # Golub-Reinsch step 2d
+        i_start = p + 1
+        i_stop = n - q - 1
+        if np.diagonal(B[i_start:i_stop, i_start:i_stop]).any():
+            # TODO: apply the Golub-Kahan SVD step
+            pass
+        else:
+            # TODO: Apply Givens rotation so that B[i][i + 1] == 0 and B_2_2(p, q) is still upper bidiagonal
+            pass
+
+        break
