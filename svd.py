@@ -16,11 +16,11 @@ def zeroize(x):
 def householder(x):
     """Compute the Householder vector of the given column vector `x`."""
 
+    alpha = x[0]
     s = (x[1:]**2).sum()
+    t = np.sqrt(alpha ** 2 + s)
 
     if s > EPS:
-        alpha = x[0]
-        t = np.sqrt(alpha**2 + s)
         v_zero = alpha - t if alpha <= 0 else -s / (alpha + t)
         beta = 2 * v_zero ** 2 / (s + v_zero ** 2)
     else:
@@ -69,18 +69,15 @@ def bidiagonalize(x):
 def givens(x, z):
     """Return the Givens matrix to map `x` -> r and `z` -> 0, where `r = (x**2 + z**2)**0.5`"""
 
-    if z == 0:
-        return 1., 0.
-
     r = (x**2 + z**2)**0.5
-    c = x / r
-    s = -z / r
+    c, s = (1., 0) if z == 0 else (x / r, -z / r)
     return np.array([[c, s], [-s, c]])
 
 
 def has_zero_superdiagonal(x):
     """Return `True` if the given square matrix `x` is has any zero entry above its diagonal."""
     assert x.shape[0] == x.shape[1] and x.ndim == 2
+
     m = x.shape[0]
 
     for i in range(1, m):
@@ -97,13 +94,75 @@ def is_diagonal(x):
     return not np.any(x - np.diag(np.diagonal(x)))
 
 
+# based on https://www.cs.utexas.edu/users/inderjit/public_papers/HLA_SVD.pdf
+def golub_kahan(B, Q, P, p, q):
+    """Execute the Golub-Kahan SVD step, modifying `B`, `Q`, and `P` in place."""
+
+    m, n = B.shape
+
+    # step 1
+    B_2_2 = B[p + 1:n - q, p + 1:n - q]
+
+    # step 2
+    C = np.matmul(B_2_2.T, B_2_2)[-2:, -2:]
+
+    def det(C):
+        """Return the determinant of a 2x2 matrix `C`"""
+        a, b, c, d = C[0][0], C[0][1], C[1][0], C[1][1]
+        return (a * d) - (b * c)
+
+    # derived using the determinant of a 2x2 matrix and the quadratic formula
+    def eigenvalues(C):
+        """Compute the eigenvalues of a 2x2 matrix C"""
+
+        a = 1
+        b = (C[0][0] - C[1][1])
+        c = -det(C)
+
+        # ax^2 + bx + c = 0
+
+        x1 = (-b + (b**2 - 4*a*c)**0.5) / (2 * a)
+        x2 = (-b - (b**2 - 4*a*c)**0.5) / (2 * a)
+
+        return x1, x2
+
+    # step 3
+    x1, x2 = eigenvalues(C)
+
+    # assign whichever eigenvalue is closer to C[2][2] to mu
+    mu = x1 if abs(C[2][2] - x1) < abs(C[2][2] - x2) else x2
+
+    # step 4
+    k = p + 1
+    alpha = B[k][k]**2 - mu
+    beta = B[k][k] * B[k][k + 1]
+
+    # step 5
+    for k in range(p + 1, n - q - 1):
+        # step 5a
+        rotation = givens(alpha, beta)
+        # step 5b
+        B[:, [k, k + 1]] = np.matmul(B[:, [k, k + 1]], rotation)
+        # step 5c
+        P = np.matmul(P, rotation)
+        # step 5d
+        alpha = B[k][k], beta = B[k + 1][k]
+        # step 5e
+        rotation = givens(alpha, beta).T
+        # step 5f
+        B[[k + 1, k], :] = np.matmul(rotation, B[[k + 1, k], :])
+        # step 5g
+        Q[[k + 1, k], :] = np.matmul(rotation, Q[[k + 1, k], :])
+        # step 5h appears to be a no-op
+
+
 # Golub-Reinsch SVD algorithm
 # implementation based on:
 #   "Numerical Recipes in C" section 2.6, see http://www.grad.hr/nastava/gs/prg/NumericalRecipesinC.pdf
 #
 #   "Computation of the Singular Value Decomposition",
 #   see https://www.cs.utexas.edu/users/inderjit/public_papers/HLA_SVD.pdf
-def svd(x):
+def svd(x, max_iterations=30):
     """Compute the singular value decomposition of the matrix `x`"""
 
     m, n = x.shape
@@ -113,7 +172,9 @@ def svd(x):
     V = V_t.T
 
     # Golub-Reinsch step 2
-    while True:
+    num_iterations = 0
+    Sigma = None
+    while num_iterations < max_iterations:
 
         # Golub-Reinsch step 2a
         for i in range(n - 1):
@@ -146,11 +207,16 @@ def svd(x):
         i_start = p + 1
         i_stop = n - q - 1
         if np.diagonal(B[i_start:i_stop, i_start:i_stop]).any():
-            # TODO: apply the Golub-Kahan SVD step
-            pass
+            # apply the Golub-Kahan SVD step
+            golub_kahan(B, U, V, p, q)
         else:
-            # Apply Givens rotation so that B[i][i + 1] == 0 and B_2_2(p, q) is still upper bidiagonal
+            # apply Givens rotation so that B[i][i + 1] == 0 and B_2_2(p, q) is still upper bidiagonal
             rotation = givens(B[i][i + 1], B[i][i])
             B[:, [i + 1, i]] = np.matmul(B[:, [i + 1, i]], rotation)
 
-        break
+        num_iterations += 1
+
+    if Sigma is None:
+        raise RuntimeError(f"SVD failed to converge in {max_iterations} iterations")
+    else:
+        return U, Sigma, V
