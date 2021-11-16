@@ -67,7 +67,7 @@ def bidiagonalize(x):
 
 # based on https://drsfenner.org/blog/2016/03/givens-rotations-and-qr/
 def givens(x, z):
-    """Return the Givens matrix to map `x` -> r and `z` -> 0, where `r = (x**2 + z**2)**0.5`"""
+    """Return the Givens matrix to map `x` -> `r` and `z` -> 0, where `r = (x**2 + z**2)**0.5`"""
 
     r = (x**2 + z**2)**0.5
     c, s = (1., 0) if z == 0 else (x / r, -z / r)
@@ -108,18 +108,22 @@ def golub_kahan(B, Q, P, p, q):
 
     def det(C):
         """Return the determinant of a 2x2 matrix `C`"""
-        a, b, c, d = C[0][0], C[0][1], C[1][0], C[1][1]
+        a, b, c, d = C.flatten().tolist()
         return (a * d) - (b * c)
 
     # derived using the determinant of a 2x2 matrix and the quadratic formula
+    # A = [[a, b], [c, d]]
+    # |A - lI| = 0 (where l is an eigenvalue)
+    # la*ld - bc = 0 (the determinant)
+    # l**2 - l(a - d) - (ad - bc) = 0 (a quadratic polynomial)
     def eigenvalues(C):
         """Compute the eigenvalues of a 2x2 matrix C"""
 
+        # ax^2 + bx + c = 0
+        # so a = 1, b = (C[0][0] - C[1][1]), c = -det(C)
         a = 1
         b = (C[0][0] - C[1][1])
         c = -det(C)
-
-        # ax^2 + bx + c = 0
 
         x1 = (-b + (b**2 - 4*a*c)**0.5) / (2 * a)
         x2 = (-b - (b**2 - 4*a*c)**0.5) / (2 * a)

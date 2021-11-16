@@ -6,7 +6,7 @@ import svd
 
 class SVDTests(unittest.TestCase):
     def testBidiagonalization(self):
-        x = np.random.random([4, 3])
+        x = np.random.random([10, 4])
         U, A, V_t = svd.bidiagonalize(x)
         reconstruction = np.matmul(np.matmul(U, A), V_t)
         self.assertTrue(np.allclose(reconstruction, x))
