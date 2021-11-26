@@ -1,226 +1,287 @@
+'''Golub-Reinsch SVD algorithm
+     This implementation is based on:
+     "Numerical Recipes in C" section 2.6, 
+     see http://www.grad.hr/nastava/gs/prg/NumericalRecipesinC.pdf
+'''
+
 import numpy as np
 
-# from "Numerical Recipes in C" p. 65
-EPS = 10**-6
-
-
-def zeroize(x):
-    """Zero out entries `x[i][j]` in the given matrix `x` where `abs(x[i][j]) <= EPS`"""
-
-    return x * (np.abs(x) > EPS)
-
-
-# based on:
-#   https://stackoverflow.com/questions/53489237/how-can-you-implement-householder-based-qr-decomposition-in-python
-#   http://drsfenner.org/blog/2016/03/householder-bidiagonalization/
-def householder(x):
-    """Compute the Householder vector of the given column vector `x`."""
-
-    alpha = x[0]
-    s = (x[1:]**2).sum()
-    t = np.sqrt(alpha ** 2 + s)
-
-    if s > EPS:
-        v_zero = alpha - t if alpha <= 0 else -s / (alpha + t)
-        beta = 2 * v_zero ** 2 / (s + v_zero ** 2)
-    else:
-        v_zero = 1.
-        beta = 0
-
-    v = np.copy(x)
-    v[0] = v_zero
-
-    return v / v_zero, beta
-
-
-# based on http://drsfenner.org/blog/2016/03/householder-bidiagonalization/
-def bidiagonalize(x):
-    """Compute the bidiagonal form of the matrix `x` using Householder reflections."""
-
-    A = x.copy()
-    m, n = A.shape
-    assert m >= n
-    U, V_t = np.eye(m), np.eye(n)
-
-    def left(k):
-        v, beta = householder(A[k:, k])
-        A[k:, k:] = (np.eye(m - k) - beta * np.outer(v, v)).dot(A[k:, k:])
-        Q = np.eye(m)
-        Q[k:, k:] -= beta * np.outer(v, v)
-        return U.dot(Q)
-
-    def right(k):
-        v, beta = householder(A[k, k + 1:].T)
-        A[k:, k + 1:] = A[k:, k + 1:].dot(np.eye(n - (k + 1)) - beta * np.outer(v, v))
-        P = np.eye(n)
-        P[k + 1:, k + 1:] -= beta * np.outer(v, v)
-        return P.dot(V_t)
-
-    for k in range(n):
-        U = left(k)
-
-        if k <= n - 2:
-            V_t = right(k)
-
-    return U, zeroize(A), V_t
-
-
-# based on https://drsfenner.org/blog/2016/03/givens-rotations-and-qr/
-def givens(x, z):
-    """Return the Givens matrix to map `x` -> `r` and `z` -> 0, where `r = (x**2 + z**2)**0.5`"""
-
-    r = (x**2 + z**2)**0.5
-    c, s = (1., 0) if z == 0 else (x / r, -z / r)
-    return np.array([[c, s], [-s, c]])
-
-
-def has_zero_superdiagonal(x):
-    """Return `True` if the given square matrix `x` is has any zero entry above its diagonal."""
-    assert x.shape[0] == x.shape[1] and x.ndim == 2
-
-    m = x.shape[0]
-
-    for i in range(1, m):
-        if not np.diagonal(x[:i, :i]).all():
-            return True
-
-    return False
-
-
-def is_diagonal(x):
-    """Return `True` if the given square matrix `x` is diagonal."""
-    assert x.shape[0] == x.shape[1] and x.ndim == 2
-
-    return not np.any(x - np.diag(np.diagonal(x)))
-
-
-# based on https://www.cs.utexas.edu/users/inderjit/public_papers/HLA_SVD.pdf
-def golub_kahan(B, Q, P, p, q):
-    """Execute the Golub-Kahan SVD step, modifying `B`, `Q`, and `P` in place."""
-
-    m, n = B.shape
-
-    # step 1
-    B_2_2 = B[p + 1:n - q, p + 1:n - q]
-
-    # step 2
-    C = np.matmul(B_2_2.T, B_2_2)[-2:, -2:]
-
-    def det(C):
-        """Return the determinant of a 2x2 matrix `C`"""
-        a, b, c, d = C.flatten().tolist()
-        return (a * d) - (b * c)
-
-    # derived using the determinant of a 2x2 matrix and the quadratic formula
-    # A = [[a, b], [c, d]]
-    # |A - lI| = 0 (where l is an eigenvalue)
-    # (a - l)*(d - l) - bc = 0 (the determinant)
-    # l**2 - l(a - d) - (ad - bc) = 0 (a quadratic polynomial)
-    def eigenvalues(C):
-        """Compute the eigenvalues of a 2x2 matrix C"""
-
-        # ax^2 + bx + c = 0
-        # so a = 1, b = (C[0][0] - C[1][1]), c = -det(C)
-        a = 1
-        b = (C[0][0] - C[1][1])
-        c = -det(C)
-
-        x1 = (-b + (b**2 - 4*a*c)**0.5) / (2 * a)
-        x2 = (-b - (b**2 - 4*a*c)**0.5) / (2 * a)
-
-        return x1, x2
-
-    # step 3
-    x1, x2 = eigenvalues(C)
-
-    # assign whichever eigenvalue is closer to C[2][2] to mu
-    mu = x1 if abs(C[2][2] - x1) < abs(C[2][2] - x2) else x2
-
-    # step 4
-    k = p + 1
-    alpha = B[k][k]**2 - mu
-    beta = B[k][k] * B[k][k + 1]
-
-    # step 5
-    for k in range(p + 1, n - q - 1):
-        # step 5a
-        rotation = givens(alpha, beta)
-        # step 5b
-        B[:, [k, k + 1]] = np.matmul(B[:, [k, k + 1]], rotation)
-        # step 5c
-        P = np.matmul(P, rotation)
-        # step 5d
-        alpha = B[k][k], beta = B[k + 1][k]
-        # step 5e
-        rotation = givens(alpha, beta).T
-        # step 5f
-        B[[k + 1, k], :] = np.matmul(rotation, B[[k + 1, k], :])
-        # step 5g
-        Q[[k + 1, k], :] = np.matmul(rotation, Q[[k + 1, k], :])
-        # step 5h appears to be a no-op
-
-
-# Golub-Reinsch SVD algorithm
-# implementation based on:
-#   "Numerical Recipes in C" section 2.6, see http://www.grad.hr/nastava/gs/prg/NumericalRecipesinC.pdf
+# -------------------------- #
 #
-#   "Computation of the Singular Value Decomposition",
-#   see https://www.cs.utexas.edu/users/inderjit/public_papers/HLA_SVD.pdf
-def svd(x, max_iterations=30):
-    """Compute the singular value decomposition of the matrix `x`"""
+EPS = 1.e-15  # assumes double precision
+TOL = 1.e-64/EPS
 
-    m, n = x.shape
-
-    # step 1
-    U, B, V_t = bidiagonalize(x)
-    V = V_t.T
-
-    # step 2
-    num_iterations = 0
-    Sigma = None
-    while num_iterations < max_iterations:
-
-        # step 2a
-        for i in range(n - 1):
-            if abs(B[i][i + 1]) < EPS:
-                B[i][i + 1] = 0
-
-        # step 2b
-        B_2_2 = lambda p, q: B[-(q + p):-q, p + 1:-q]
-        B_3_3 = lambda q: B[-q:, -q:]
-
-        p = 1
-        q = n - 1
-        while (p * 2) < n:
-
-            if not is_diagonal(B_3_3(q)):
-                break
-
-            if not has_zero_superdiagonal(B_2_2(p, q)):
-                break
-
-            p += 1
-            q = n - (p * 2)
-
-        # step 2c
-        if q == (n - (p + q)):
-            Sigma = np.diagonal(B)
-            break
-
-        # step 2d
-        i_start = p + 1
-        i_stop = n - q - 1
-        if np.diagonal(B[i_start:i_stop, i_start:i_stop]).any():
-            # apply the Golub-Kahan SVD step
-            golub_kahan(B, U, V, p, q)
-        else:
-            # apply Givens rotation so that B[i][i + 1] == 0 and B_2_2(p, q) is still upper bidiagonal
-            rotation = givens(B[i][i + 1], B[i][i])
-            B[:, [i + 1, i]] = np.matmul(B[:, [i + 1, i]], rotation)
-
-        num_iterations += 1
-
-    if Sigma is None:
-        raise RuntimeError(f"SVD failed to converge in {max_iterations} iterations")
+# -------------------------- #
+#
+# Utility functions
+#
+'''
+Utility functions are based on the header nrutil.h
+  To downdolad it please follow:
+  https://lweb.cfa.harvard.edu/~sasselov/rec/code/nrutil.h
+'''
+SQR = lambda a: 0.0 if a == 0.0 else a*a
+SIGN = lambda a,b: np.fabs(a) if b>=0.0 else -np.fabs(a)
+def PYTHAG(a,b): 
+    aa, bb = np.fabs(a), np.fabs(b)
+    if aa > bb:
+        return aa * np.sqrt(1.0 + SQR(bb/aa))
     else:
-        return U, Sigma, V
+        return bb * np.sqrt(1.0 + SQR(aa/bb))
+
+# -------------------------- #
+#
+# Helper functions
+#
+def testfsplit(U, W, e, k):
+    goto_test_f_convergence = False
+
+    for l in np.arange(k+1)[::-1]:
+        if abs(e[l]) <= EPS:
+            # goto test f convergence
+            goto_test_f_convergence = True
+            break  # break out of l loop
+        if abs(W[l-1]) <= EPS:
+            # goto cancellation
+            break  # break out of l loop
+
+    if goto_test_f_convergence: return l
+
+    # cancellation of e[l] if l>0
+    cancelation(U, W, e, l, k)
+
+def cancelation(U, W, e, l, k):
+    c, s, l1 = 0.0, 1.0, l-1
+
+    for i in range(l,k+1):
+        f, e[i] = s * e[i], c * e[i]
+
+        # abs(f) <= maxiter: goto test f convergence
+        if abs(f) <= EPS: break
+            
+        g = W[i]
+        h = PYTHAG(f, g)
+        W[i], c, s = h, g/h, -f/h
+
+        Y, Z = U[:,l1].copy(), U[:,i].copy()
+        U[:,l1] =  Y * c + Z * s
+        U[:,i]  = -Y * s + Z * c
+
+# -------------------------- #
+#
+def householder(U, W, e):
+    '''
+    Householder's reduction to bidiagonal form
+    '''
+
+    m, n = U.shape
+    g, x = 0.0, 0.0
+
+    for i in range(n):
+        e[i], l = g, i+1
+        s = U[i:,i].dot(U[i:,i])
+
+        if s <= TOL:
+            g = 0.0
+        else:
+            f = U[i,i]
+            g = -SIGN(np.sqrt(s), f)
+            h = f * g - s
+            U[i,i] = f - g
+
+            for j in range(l,n):
+                f = U[i:,i].dot(U[i:,j]) / h
+                U[i:,j] += f * U[i:,i]
+
+        W[i] = g
+        s = U[i,l:].dot(U[i,l:])
+
+        if s <= TOL:
+            g = 0.0
+        else:
+            f = U[i,l]
+            g = -SIGN(np.sqrt(s), f)
+            h = f * g - s
+            U[i,l] = f - g
+            e[l:] = U[i,l:] / h
+
+            for j in range(l,m):
+                s = U[j, l:].dot(U[i,l:])
+                U[j,l:] += s * e[l:] 
+
+        y = abs(W[i]) + abs(e[i])
+        if y > x: x = y
+
+    # return U, W, e, x
+
+def rht(U, V, e):
+    '''
+    Accumulation of right hand transformations (rht)
+    '''
+    m, n = U.shape
+    g, l = 0.0, 0
+
+    for i in np.arange(n)[::-1]:
+        if i < n-1:
+            if g != 0.0:
+                V[l:,i] = ( U[i,l:] / U[i,l] ) / g
+                for j in range(l,n):
+                    s = U[i,l:].dot(V[l:,j])
+                    V[l:,j] += s * V[l:,i]
+
+            V[i,l:] = V[l:,i] = 0.0
+
+        V[i,i], g, l = 1.0, e[i], i
+
+    # return V
+
+def lht(U, W):
+    '''
+    Accumulation of left hand transformations (lht)
+    '''
+    m, n = U.shape
+
+    for i in np.arange(n)[::-1]:
+        l = i+1
+        g = W[i]
+        U[i,l:] = 0.0
+
+        if g != 0.0:
+            h = U[i,i] * g
+            for j in range(l,n):
+                f = U[l:,i].dot(U[l:,j]) / h
+                U[i:,j] += f * U[i:,i]
+
+            U[i:,i] /= g
+
+        else:
+            U[i:,i] = 0.0
+
+        U[i,i] += 1.0
+
+    # return U
+
+def golubkahan(U, W, V, e, k, maxiter=30):
+    '''
+    Diagonalization of the bidiagonal form: 
+        - k is the kth singular value
+        - loop over maxiter allowed iteration
+    '''
+
+    for t in range(maxiter):
+
+        # test f splitting
+        l = testfsplit(U, W, e, k)
+
+        # test f convergence
+        if l == k:
+            # convergence
+            if W[k] < 0.0:
+                #W[k] is made non-negative
+                W[k] *= -1
+                V[:,k] *= -1
+            break  # break out of iteration loop and move on to next k value
+
+        if t == maxiter-1:
+            if __debug__: print ('Error: no convergence.')
+            # should this move on the the next k or exit with error??
+            #raise ValueError,'SVD Error: No convergence.'  # exit the program with error
+            break  # break out of iteration loop and move on to next k
+
+        # shift from bottom 2x2 minor
+        x, y, z = W[l], W[k-1], W[k]
+        g, h = e[k-1], e[k]
+
+        f = ((y-z)*(y+z)+(g-h)*(g+h))/(2.0*h*y)
+        g = PYTHAG(f, 1.0)
+        f = ((x-z)*(x+z)+h*((y/(f+SIGN(g,f)))-h))/x
+
+        # next QR transformation
+        c = s = 1.0
+
+        for i in range(l+1,k+1):
+            g, y = e[i], W[i]
+            h, g = s*g, c*g
+
+            z = PYTHAG(f,h)
+            e[i-1] = z
+
+            c, s = f/z, h/z
+            f, g = x*c+g*s, g*c-x*s
+            h, y = y*s, y*c
+
+            X, Z = V[:,i-1].copy(), V[:,i].copy()
+            V[:,i-1] = c * X + s * Z
+            V[:,i  ] = c * Z - s * X
+
+            z = PYTHAG(f, h)
+            W[i-1] = z
+
+            c, s = f/z, h/z
+            f, x = c*g+s*y, c*y-s*g
+
+            Y, Z = U[:,i-1].copy(), U[:,i].copy()
+            U[:,i-1] = c * Y + s * Z
+            U[:,i  ] = c * Z - s * Y
+
+        e[l], e[k], W[k] = 0.0, f, x
+
+    # return U, W, V, e
+
+# -------------------------- #
+# 
+# Main functions
+#
+def bidiagonalize(A, tosvd=False):
+    '''
+    Reduction to bidiagonal form
+    '''
+
+    U = np.asarray(A).copy()
+    m, n = U.shape
+
+    if m < n:
+        if __debug__: print ('Error: m is less than n')
+        raise ValueError ('SVD Error: m is less than n.')
+
+    W = np.zeros(n)
+    V = np.zeros((n,n))
+    e = np.zeros(n) # allocate arrays
+
+    householder(U, W, e)
+    rht(U, V, e)
+    lht(U, W)
+
+    if not tosvd:
+        # A = np.zeros((n,n))
+        # for i in range(n): A[i, i] += W[i]
+        A = np.diag(W)
+        for i in range(1,n): A[i-1, i] += e[i]
+
+        return U, A, V
+
+    return U, W, V, e
+
+def svd(A, maxiter=30):
+    '''
+    Given a matrix A, this routine computes its SVD A = U.W.VT
+      - The matrix U is output as a replacing A on output. This mean 
+        matrix U will have same size of matrix A.
+      - The matrix W is ouput as the diagonal matrix of singular values
+      - The matrix V (not the transpose VT) is output as matrix V
+    '''
+
+    # Bidiagonal form
+    U, W, V, e = bidiagonalize(A, tosvd=True)
+
+    # Diagonalization of the bidiagonal form: 
+    #    - loop over singular values
+    #    - for each singular value apply golub-kahan method
+    #
+    for k in np.arange(U.shape[1])[::-1]:
+        golubkahan(U, W, V, e, k, maxiter=maxiter)
+
+    # return
+    return U, np.diag(W), V
+
+# -------------------------- #

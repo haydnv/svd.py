@@ -1,14 +1,14 @@
 import numpy as np
 import unittest
-
 import svd
 
 
 class SVDTests(unittest.TestCase):
     def testBidiagonalization(self):
         x = np.random.random([10, 4])
-        U, A, V_t = svd.bidiagonalize(x)
-        reconstruction = np.matmul(np.matmul(U, A), V_t)
+        U, A, V = svd.bidiagonalize(x)
+
+        reconstruction = np.matmul(np.matmul(U, A), V.T)
         self.assertTrue(np.allclose(reconstruction, x))
 
     def testSVD(self):
@@ -17,7 +17,7 @@ class SVDTests(unittest.TestCase):
         U, Sigma, V = svd.svd(x)
         reconstruction = np.matmul(np.matmul(U, Sigma), V.T)
 
-        self.assertTrue(np.allclose(np.matmul(U.T, U), np.eye(m)))
+        self.assertTrue(np.allclose(np.matmul(U.T, U), np.eye(n)))
         self.assertTrue(np.allclose(np.matmul(V.T, V), np.eye(n)))
         self.assertTrue(np.allclose(reconstruction, x))
 
