@@ -1,6 +1,7 @@
 '''
 Golub-Reinsch SVD algorithm
-  This algorithm computes the SVD of mxn matrix where m>n only
+  This algorithm computes the SVD of any mxn matrix
+    - It work foe all cases: m>n, m<n and m=n
 
   This implementation is based on:
   "Numerical Recipes in C" section 2.6, 
@@ -21,7 +22,6 @@ import numpy as np
 # -------------------------- #
 #
 EPS = 1.e-6  # assumes single-precision
-TOL = 1.e-32/EPS
 
 # -------------------------- #
 #
@@ -61,6 +61,7 @@ def testfsplit(U, W, e, k):
 
     # cancellation of e[l] if l>0
     cancelation(U, W, e, l, k)
+    return l
 
 def cancelation(U, W, e, l, k):
     c, s, l1 = 0.0, 1.0, l-1
@@ -88,43 +89,55 @@ def householder(U, W, e):
 
     m, n = U.shape
     g, x = 0.0, 0.0
+    scale = 0.0
 
     for i in range(n):
-        e[i], l = g, i+1
-        s = U[i:,i].dot(U[i:,i])
+        e[i], l = scale*g, i+1
 
-        if s <= TOL:
-            g = 0.0
+        if i < m:
+            scale = U[i:,i].dot(U[i:,i])
+
+            if scale <= EPS:
+                g = 0.0
+            else:
+                U[i:,i] /= scale
+                s = U[i:,i].dot(U[i:,i])
+                f = U[i,i].copy()
+                g = -SIGN(np.sqrt(s), f)
+                h = f * g - s
+                U[i,i] = f - g
+
+                for j in range(l,n):
+                    f = U[i:,i].dot(U[i:,j]) / h
+                    U[i:,j] += f * U[i:,i]
+
+                U[i:,i] *= scale
         else:
-            f = U[i,i]
-            g = -SIGN(np.sqrt(s), f)
-            h = f * g - s
-            U[i,i] = f - g
-
-            for j in range(l,n):
-                f = U[i:,i].dot(U[i:,j]) / h
-                U[i:,j] += f * U[i:,i]
-
-        W[i] = g
-        s = U[i,l:].dot(U[i,l:])
-
-        if s <= TOL:
             g = 0.0
+
+        W[i] = scale * g
+
+        if (i < m) and (i != n-1):
+            scale = U[i,l:].dot(U[i,l:])
+
+            if scale <= EPS:
+                g = 0.0
+            else:
+                U[i,l:] /= scale
+                s = U[i,l:].dot(U[i,l:])
+                f = U[i,l].copy()
+                g = -SIGN(np.sqrt(s), f)
+                h = f * g - s
+                U[i,l] = f - g
+                e[l:] = U[i,l:] / h
+
+                for j in range(l,m):
+                    s = U[j, l:].dot(U[i,l:])
+                    U[j,l:] += s * e[l:]
+
+                U[i,l:] *= scale
         else:
-            f = U[i,l]
-            g = -SIGN(np.sqrt(s), f)
-            h = f * g - s
-            U[i,l] = f - g
-            e[l:] = U[i,l:] / h
-
-            for j in range(l,m):
-                s = U[j, l:].dot(U[i,l:])
-                U[j,l:] += s * e[l:] 
-
-        y = abs(W[i]) + abs(e[i])
-        if y > x: x = y
-
-    # return U, W, e, x
+            g = 0.0
 
 def rht(U, V, e):
     '''
@@ -145,33 +158,31 @@ def rht(U, V, e):
 
         V[i,i], g, l = 1.0, e[i], i
 
-    # return V
-
 def lht(U, W):
     '''
     Accumulation of left hand transformations (lht)
     '''
     m, n = U.shape
 
-    for i in np.arange(n)[::-1]:
+    for i in np.arange(min([m,n]))[::-1]:
         l = i+1
         g = W[i]
         U[i,l:] = 0.0
 
         if g != 0.0:
-            h = U[i,i] * g
+            # h = U[i,i] * g
+            g = 1.0 / g
             for j in range(l,n):
-                f = U[l:,i].dot(U[l:,j]) / h
+                f = (U[l:,i].dot(U[l:,j]) / U[i,i]) * g
                 U[i:,j] += f * U[i:,i]
 
-            U[i:,i] /= g
+            # U[i:,i] /= g
+            U[i:,i] *= g
 
         else:
             U[i:,i] = 0.0
 
         U[i,i] += 1.0
-
-    # return U
 
 def golubkahan(U, W, V, e, k, maxiter=30):
     '''
@@ -184,6 +195,7 @@ def golubkahan(U, W, V, e, k, maxiter=30):
 
         # test f splitting
         l = testfsplit(U, W, e, k)
+        # print('l:', l, k)
 
         # test f convergence
         if l == k:
@@ -229,7 +241,10 @@ def golubkahan(U, W, V, e, k, maxiter=30):
             z = PYTHAG(f, h)
             W[i-1] = z
 
-            c, s = f/z, h/z
+            if z >= EPS:
+                c, s = f/z, h/z
+
+            # c, s = f/z, h/z
             f, x = c*g+s*y, c*y-s*g
 
             Y, Z = U[:,i-1].copy(), U[:,i].copy()
@@ -237,8 +252,6 @@ def golubkahan(U, W, V, e, k, maxiter=30):
             U[:,i  ] = c * Z - s * Y
 
         e[l], e[k], W[k] = 0.0, f, x
-
-    # return U, W, V, e
 
 # -------------------------- #
 # 
@@ -252,10 +265,6 @@ def bidiagonalize(A, tosvd=False):
     U = np.asarray(A).copy()
     m, n = U.shape
 
-    if m < n:
-        if __debug__: print ('Error: m is less than n')
-        raise ValueError ('SVD Error: m is less than n.')
-
     W = np.zeros(n)
     V = np.zeros((n,n))
     e = np.zeros(n) # allocate arrays
@@ -265,8 +274,6 @@ def bidiagonalize(A, tosvd=False):
     lht(U, W)
 
     if not tosvd:
-        # A = np.zeros((n,n))
-        # for i in range(n): A[i, i] += W[i]
         A = np.diag(W)
         for i in range(1,n): A[i-1, i] += e[i]
 
@@ -277,10 +284,11 @@ def bidiagonalize(A, tosvd=False):
 def svd(A, maxiter=30):
     '''
     Given a matrix A, this routine computes its SVD A = U.W.VT
-      - The matrix U is output as a replacing A on output. This mean 
+      - The matrix U is output mxm matrix. This mean 
         matrix U will have same size of matrix A.
-      - The matrix W is ouput as the diagonal matrix of singular values
-      - The matrix V (not the transpose VT) is output as matrix V
+      - The matrix W is ouput as the diagonal mxn matrix that contains 
+        the singular values
+      - The matrix V (not the transpose VT) is output as nxn matrix V
     '''
 
     # Bidiagonal form
@@ -293,7 +301,15 @@ def svd(A, maxiter=30):
     for k in np.arange(U.shape[1])[::-1]:
         golubkahan(U, W, V, e, k, maxiter=maxiter)
 
+    
     # return
-    return U, np.diag(W), V
+    m, n = U.shape
+    idsorted = np.argsort(-W)
+
+    U = U[:,idsorted]
+    W = W[idsorted]
+    V = V[:,idsorted]
+
+    return U[:,:m], np.diag(W)[:m,:], V
 
 # -------------------------- #
